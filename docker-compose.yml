@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Keep the Outlook login in a volume so it survives rebuilds
+      TOKEN_CACHE_PATH: /data/token_cache.bin
+    volumes:
+      - token-cache:/data
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # What the *browser* uses to reach the backend; change when hosting
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  token-cache:

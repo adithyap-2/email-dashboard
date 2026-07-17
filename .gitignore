@@ -1,0 +1,16 @@
+# Secrets & tokens — never commit
+backend/.env
+backend/token_cache.bin
+
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
