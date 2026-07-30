@@ -1,28 +1,68 @@
+# Relationship Intelligence Dashboard — the whole stack.
+#
+#   app  — FastAPI backend serving the built dashboard on one URL (:8000).
+#          This is the only service teammates ever open.
+#   n8n  — automation that reads Microsoft Graph / SharePoint on a timer and
+#          pushes normalised data into the app via POST /ingest/*.
+#
+# Setup walkthrough: docs/SETUP.md
 services:
-  backend:
-    build: ./backend
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
+      # On a shared server this is what the team reaches. Put a reverse proxy
+      # (Caddy/nginx) in front for HTTPS and set PUBLIC_BASE_URL to match.
       - "8000:8000"
     env_file:
       - ./backend/.env
     environment:
-      # Keep the Outlook login in a volume so it survives rebuilds
+      # Keep login + DB in a volume so they survive rebuilds. These override the
+      # relative paths in .env for the container's filesystem.
       TOKEN_CACHE_PATH: /data/token_cache.bin
+      DB_PATH: /data/data.db
+      ENGAGEMENT_XLSX: /app/Engagement Sheet.xlsx
     volumes:
-      - token-cache:/data
+      - app-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
-  frontend:
-    build:
-      context: ./frontend
-      args:
-        # What the *browser* uses to reach the backend; change when hosting
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+  n8n:
+    # Pinned, not :latest — every teammate and the server run the identical
+    # version, so a workflow that works in one place works in the others.
+    image: n8nio/n8n:2.31.6
     ports:
-      - "3000:3000"
+      # Bound to loopback ON PURPOSE. n8n's credential store holds the app-only
+      # secret that can read every mailbox in the tenant, so the editor must not
+      # be reachable from the network. Admins reach it over an SSH tunnel:
+      #   ssh -L 5678:localhost:5678 <user>@<server>
+      - "127.0.0.1:5678:5678"
+    environment:
+      # Inside the compose network, reach the backend at http://app:8000.
+      N8N_BACKEND_URL: http://app:8000
+      # The /ingest/* nodes read the URL above via {{ $env.N8N_BACKEND_URL }}.
+      # n8n blocks $env in expressions unless this is explicitly false, and
+      # fails the node with "access to env vars denied".
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      GENERIC_TIMEZONE: Asia/Kolkata
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_RUNNERS_ENABLED: "true"
+      # NOTE: n8n encrypts saved credentials with a key it generates into the
+      # n8n-data volume on first start. Losing that volume makes every stored
+      # credential unreadable — back it up (docs/SETUP.md, "Backups").
+    volumes:
+      - n8n-data:/home/node/.n8n    # workflows, credentials (encrypted)
     depends_on:
-      - backend
+      - app
     restart: unless-stopped
 
 volumes:
-  token-cache:
+  app-data:
+  n8n-data:

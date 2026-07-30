@@ -1,27 +1,64 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* Relationship Intelligence Dashboard — design tokens.
+   Minimal, spacious, M365 / Notion / Linear feel. Neutral surfaces, one blue
+   accent, green as the second data-series hue (validated categorical pair). */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --bg: #f6f7f9;          /* page plane */
+  --surface: #ffffff;     /* cards */
+  --surface-2: #fbfcfd;   /* subtle inset */
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.14);
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --accent: #2a78d6;      /* blue — primary accent + emails series */
+  --accent-soft: #eaf2fc;
+  --series-emails: #2a78d6;
+  --series-meetings: #008300;
+  --good: #0ca30c;
+  --warn: #eda100;
+  --danger: #e34948;
+  --shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #0b0c0e;
+    --surface: #16181d;
+    --surface-2: #1b1e24;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+    --text: #e7e9ee;
+    --text-muted: #9aa3b2;
+    --text-faint: #6b7280;
+    --accent: #3987e5;
+    --accent-soft: #17263a;
+    --series-emails: #3987e5;
+    --series-meetings: #1f9d1f;
+    --good: #0ca30c;
+    --warn: #c98500;
+    --danger: #e66767;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
 }

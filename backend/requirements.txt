@@ -6,3 +6,4 @@ python-dotenv
 langgraph
 langchain-openai
 pydantic
+openpyxl

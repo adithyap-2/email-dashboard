@@ -1,0 +1,14 @@
+# Build context is the repo root (see docker-compose.yml). Keep it lean.
+**/node_modules
+**/.next
+frontend/out
+**/.venv
+**/__pycache__
+**/*.pyc
+**/backend.log
+**/frontend.log
+backend/data.db
+backend/token_cache.bin
+backend/.env
+.git
+.DS_Store

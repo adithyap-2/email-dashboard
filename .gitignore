@@ -2,6 +2,9 @@
 backend/.env
 backend/token_cache.bin
 
+# App database (populated at runtime by n8n / sample seeder)
+backend/data.db
+
 # Python
 backend/.venv/
 __pycache__/

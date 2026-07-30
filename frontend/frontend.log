@@ -5,27 +5,57 @@
 ▲ Next.js 16.2.10 (Turbopack)
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.2:3000
-✓ Ready in 253ms
+✓ Ready in 229ms
 
- GET / 200 in 173ms (next.js: 77ms, application-code: 96ms)
- GET / 200 in 49ms (next.js: 6ms, application-code: 43ms)
- GET / 200 in 18ms (next.js: 3ms, application-code: 16ms)
- GET / 200 in 18ms (next.js: 1256µs, application-code: 17ms)
- GET / 200 in 33ms (next.js: 3ms, application-code: 30ms)
- GET / 200 in 26ms (next.js: 2ms, application-code: 23ms)
- GET / 200 in 19ms (next.js: 1194µs, application-code: 18ms)
- GET / 200 in 28ms (next.js: 1259µs, application-code: 27ms)
- GET / 200 in 36ms (next.js: 10ms, application-code: 26ms)
- GET / 200 in 38ms (next.js: 5ms, application-code: 32ms)
- GET / 200 in 35ms (next.js: 4ms, application-code: 31ms)
- GET / 200 in 33ms (next.js: 2ms, application-code: 31ms)
- GET / 200 in 30ms (next.js: 6ms, application-code: 24ms)
- GET / 200 in 34ms (next.js: 3ms, application-code: 31ms)
- GET / 200 in 14ms (next.js: 1235µs, application-code: 12ms)
- GET / 200 in 12ms (next.js: 810µs, application-code: 11ms)
- GET / 200 in 37ms (next.js: 4ms, application-code: 33ms)
- GET / 200 in 23ms (next.js: 3ms, application-code: 20ms)
-✓ Compiled in 405ms
-✓ Compiled in 22ms
-✓ Compiled in 11ms
-[?25h
+ GET / 200 in 147ms (next.js: 81ms, application-code: 66ms)
+ GET / 200 in 27ms (next.js: 3ms, application-code: 23ms)
+ GET / 200 in 26ms (next.js: 4ms, application-code: 23ms)
+ GET / 200 in 37ms (next.js: 5ms, application-code: 32ms)
+ GET / 200 in 29ms (next.js: 3ms, application-code: 26ms)
+ GET / 200 in 35ms (next.js: 10ms, application-code: 25ms)
+ GET / 200 in 20ms (next.js: 1119µs, application-code: 19ms)
+ GET /apple-touch-icon-precomposed.png 404 in 383ms (next.js: 361ms, application-code: 22ms)
+ GET /apple-touch-icon.png 404 in 24ms (next.js: 6ms, application-code: 17ms)
+ GET / 200 in 37ms (next.js: 6ms, application-code: 31ms)
+ GET / 200 in 73ms (next.js: 22ms, application-code: 51ms)
+⚠ Found a change in next.config.ts. Restarting the server to apply the changes...
+▲ Next.js 16.2.10 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://10.86.1.194:3000
+✓ Ready in 385ms
+
+ GET / 200 in 221ms (next.js: 154ms, application-code: 67ms)
+ GET /apple-touch-icon.png 404 in 60ms (next.js: 23ms, application-code: 37ms)
+ GET /apple-touch-icon-precomposed.png 404 in 62ms (next.js: 13ms, application-code: 49ms)
+✓ Compiled in 38ms
+ GET /api/dashboard/?range=7d 404 in 28ms (next.js: 5ms, application-code: 23ms)
+✓ Compiled in 32ms
+ GET /api/dashboard/?range=7d 404 in 37ms (next.js: 7ms, application-code: 31ms)
+✓ Compiled in 116ms
+ GET /api/dashboard/?range=7d 404 in 56ms (next.js: 11ms, application-code: 46ms)
+✓ Compiled in 131ms
+ GET /auth/me/ 404 in 45ms (next.js: 6ms, application-code: 40ms)
+✓ Compiled in 82ms
+ GET / 200 in 110ms (next.js: 40ms, application-code: 69ms)
+ GET / 200 in 50ms (next.js: 1628µs, application-code: 48ms)
+✓ Compiled in 35ms
+✓ Compiled in 21ms
+ GET /auth/login/ 404 in 66ms (next.js: 21ms, application-code: 45ms)
+ GET /auth/login/ 404 in 48ms (next.js: 13ms, application-code: 34ms)
+ GET /auth/login/ 404 in 36ms (next.js: 5ms, application-code: 31ms)
+ GET / 200 in 39ms (next.js: 8ms, application-code: 31ms)
+ GET /auth/me/ 404 in 18ms (next.js: 1855µs, application-code: 16ms)
+ GET / 200 in 29ms (next.js: 2ms, application-code: 27ms)
+ GET /auth/me/ 404 in 28ms (next.js: 3ms, application-code: 26ms)
+ GET / 200 in 40ms (next.js: 8ms, application-code: 32ms)
+ GET /auth/me/ 404 in 21ms (next.js: 3ms, application-code: 18ms)
+ GET / 200 in 46ms (next.js: 9ms, application-code: 37ms)
+ GET /auth/me/ 404 in 19ms (next.js: 2ms, application-code: 17ms)
+ GET / 200 in 49ms (next.js: 17ms, application-code: 32ms)
+ GET /auth/me/ 404 in 23ms (next.js: 2ms, application-code: 21ms)
+ GET / 200 in 47ms (next.js: 8ms, application-code: 39ms)
+ GET /auth/me/ 404 in 20ms (next.js: 2ms, application-code: 17ms)
+ GET / 200 in 44ms (next.js: 4ms, application-code: 39ms)
+ GET /auth/me/ 404 in 25ms (next.js: 3ms, application-code: 22ms)
+ GET / 200 in 206ms (next.js: 113ms, application-code: 92ms)
+ GET /auth/me/ 404 in 31ms (next.js: 7ms, application-code: 24ms)
