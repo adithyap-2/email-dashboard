@@ -54,6 +54,17 @@ services:
       GENERIC_TIMEZONE: Asia/Kolkata
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_RUNNERS_ENABLED: "true"
+      # --- execution history retention ---
+      # Each run stores a full copy of every Graph response — ~2 MB with the
+      # mailboxes and page sizes in use, 48 runs a day. That is the only part of
+      # this stack that grows without bound, so successful runs are not kept.
+      # Failures ARE kept, which is what you need when something breaks.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: "none"
+      EXECUTIONS_DATA_SAVE_ON_ERROR: "all"
+      EXECUTIONS_DATA_SAVE_ON_PROGRESS: "false"
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: "168"            # discard anything over 7 days
+      EXECUTIONS_DATA_PRUNE_MAX_COUNT: "500"    # and cap the total kept
       # NOTE: n8n encrypts saved credentials with a key it generates into the
       # n8n-data volume on first start. Losing that volume makes every stored
       # credential unreadable — back it up (docs/SETUP.md, "Backups").

@@ -27,8 +27,12 @@ from deps import require_ingest_key, require_user
 router = APIRouter()
 
 _RANGE_HOURS = {"24h": 24, "48h": 48, "7d": 24 * 7, "30d": 24 * 30}
-UPCOMING_DAYS = 2
-PAST_DAYS = 7
+
+# How wide the on-demand Refresh pulls. It must cover the largest range the UI
+# can ask for (30d back, and 30d forward for upcoming meetings), otherwise
+# picking "30 days" shows a window the data was never fetched for.
+SYNC_PAST_DAYS = 30
+SYNC_FUTURE_DAYS = 30
 
 # Where emails/meetings come from: 'graph' (live per-user, default) or 'db'
 # (n8n-populated). Follow-ups always come from the shared engagement table.
@@ -124,6 +128,24 @@ def _range_bounds(range_key, start, end, now):
     return _graph_iso(now - timedelta(hours=hours)), _graph_iso(now)
 
 
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _window_span(start_iso: str, end_iso: str) -> timedelta:
+    """Length of the selected range. Upcoming meetings look this far *forward*,
+    so the range selector means the same thing in every panel."""
+    s, e = _parse_iso(start_iso), _parse_iso(end_iso)
+    if not s or not e or e <= s:
+        return timedelta(days=7)
+    return e - s
+
+
 # --- the dashboard --------------------------------------------------------
 @router.get("/api/dashboard")
 def dashboard(
@@ -135,8 +157,13 @@ def dashboard(
     warnings: list[str] = []
     now = datetime.now(timezone.utc)
     start_iso, end_iso = _range_bounds(range, start, end, now)
-    up_start, up_end = _graph_iso(now), _graph_iso(now + timedelta(days=UPCOMING_DAYS))
-    past_start, past_end = _graph_iso(now - timedelta(days=PAST_DAYS)), _graph_iso(now)
+    # Every panel honours the range selector. Emails and past meetings look back
+    # over it; upcoming meetings look the same distance forward. These windows
+    # used to be fixed (+2d / -7d) no matter what the user picked, so "24 hours"
+    # compared one day of email against nine days of meetings.
+    span = _window_span(start_iso, end_iso)
+    past_start, past_end = start_iso, end_iso
+    up_start, up_end = _graph_iso(now), _graph_iso(now + span)
 
     if DASHBOARD_SOURCE == "db":
         # Read n8n-populated data for this user (fast, historical, status-aware).
@@ -213,8 +240,10 @@ def dashboard(
             "range": range,
             "range_start": start_iso,
             "range_end": end_iso,
-            "upcoming_days": UPCOMING_DAYS,
-            "past_days": PAST_DAYS,
+            # The actual window each meeting panel used, derived from `range`.
+            "window_hours": round(span.total_seconds() / 3600, 2),
+            "upcoming_days": round(span.total_seconds() / 86400, 2),
+            "past_days": round(span.total_seconds() / 86400, 2),
             "source": DASHBOARD_SOURCE,
             "user": {"name": profile.get("name"), "email": profile.get("email")},
             "warnings": warnings,
@@ -288,10 +317,10 @@ def refresh(
             return []
 
     mail_start, mail_end = _graph_iso(now - timedelta(hours=hours)), _graph_iso(now)
-    # Meetings use the dashboard's own window so a newly-created event in the
-    # upcoming panel appears too, not just ones inside the mail lookback.
-    mtg_start = _graph_iso(now - timedelta(days=PAST_DAYS))
-    mtg_end = _graph_iso(now + timedelta(days=UPCOMING_DAYS))
+    # Meetings are pulled wide in both directions so every selectable range —
+    # including 30 days, and upcoming events well beyond this week — has data.
+    mtg_start = _graph_iso(now - timedelta(days=SYNC_PAST_DAYS))
+    mtg_end = _graph_iso(now + timedelta(days=SYNC_FUTURE_DAYS))
 
     emails = safe(graph_data.received_emails, token, mail_start, mail_end, internal)
     emails += safe(graph_data.sent_emails, token, mail_start, mail_end, internal)

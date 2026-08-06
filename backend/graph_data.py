@@ -16,6 +16,13 @@ import httpx
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
+# Page size for every Graph collection call. Graph returns at most this many
+# items and hides the rest behind @odata.nextLink, which we do not follow — so
+# a value that is too low silently drops data with no error. A busy CRID
+# calendar runs ~600 events over the dashboard's widest (30-day) window, so 50
+# was cutting the busiest mailboxes to a twelfth of their real activity.
+PAGE_SIZE = 999
+
 
 def _request(method: str, url: str, token: str, *, max_retries: int = 3, **kwargs):
     headers = kwargs.pop("headers", {})
@@ -69,7 +76,7 @@ def _is_external(email: str | None, internal: set[str]) -> bool:
 
 
 def received_emails(token: str, start_iso: str, end_iso: str,
-                    internal: set[str], top: int = 50) -> list[dict]:
+                    internal: set[str], top: int = PAGE_SIZE) -> list[dict]:
     """Emails the user received in the window, each tagged internal/external so
     the UI can filter. External = the sender is outside the user's domain(s)."""
     r = _request(
@@ -103,7 +110,7 @@ def received_emails(token: str, start_iso: str, end_iso: str,
 
 
 def sent_emails(token: str, start_iso: str, end_iso: str,
-                internal: set[str], top: int = 50) -> list[dict]:
+                internal: set[str], top: int = PAGE_SIZE) -> list[dict]:
     """Emails the user sent in the window, tagged internal/external. External =
     at least one recipient is outside the user's domain(s)."""
     r = _request(
@@ -140,7 +147,7 @@ def sent_emails(token: str, start_iso: str, end_iso: str,
 
 
 def meetings(token: str, start_iso: str, end_iso: str,
-             internal: set[str], top: int = 50) -> list[dict]:
+             internal: set[str], top: int = PAGE_SIZE) -> list[dict]:
     """Meetings/calls in the window, tagged internal/external. External = any
     attendee or the organiser is outside the user's domain(s)."""
     r = _request(

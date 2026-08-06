@@ -56,6 +56,9 @@ export interface DashboardData {
     range: RangeKey;
     range_start: string;
     range_end: string;
+    // All three describe the same window — the selected range, applied forward
+    // for upcoming meetings and backward for emails and past meetings.
+    window_hours: number;
     upcoming_days: number;
     past_days: number;
     user: { name: string | null; email: string | null };

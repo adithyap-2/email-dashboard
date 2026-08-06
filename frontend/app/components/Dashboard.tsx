@@ -27,6 +27,12 @@ const RANGES: { key: RangeKey; label: string }[] = [
   { key: "custom", label: "Custom" },
 ];
 
+/** The selected range, phrased for section hints ("next 24 hours"). */
+function windowLabel(range: RangeKey): string {
+  if (range === "custom") return "selected range";
+  return RANGES.find((r) => r.key === range)?.label ?? "7 days";
+}
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -521,7 +527,13 @@ export default function Dashboard() {
   const upcoming = (data?.meetings_upcoming ?? []).filter((m) => matchesComm(m.is_external, upFilter));
   const past = (data?.meetings_past ?? []).filter((m) => matchesComm(m.is_external, pastFilter));
 
-  // Communication overview — emails vs meetings per org, honouring ovFilter.
+  // Communication overview — how much contact each organisation actually had
+  // within the selected range.
+  //
+  // Only things that HAVE happened are counted: emails sent/received, and
+  // meetings that already took place. Upcoming meetings are deliberately
+  // excluded — a meeting scheduled for next week is not contact that occurred,
+  // and counting it inflated every org with something on the calendar.
   const overview: OverviewRow[] = (() => {
     if (!data) return [];
     const map = new Map<string, OverviewRow>();
@@ -534,7 +546,7 @@ export default function Dashboard() {
     [...data.emails_received, ...data.emails_sent]
       .filter((e) => matchesComm(e.is_external, ovFilter))
       .forEach((e) => bump(e.organisation, "emails"));
-    [...data.meetings_upcoming, ...data.meetings_past]
+    data.meetings_past
       .filter((m) => matchesComm(m.is_external, ovFilter))
       .forEach((m) => bump(m.organisation, "meetings"));
     return [...map.values()].sort((a, b) => b.emails + b.meetings - (a.emails + a.meetings));
@@ -694,7 +706,7 @@ export default function Dashboard() {
           <Kpi label="Due today" value={k?.followups_today ?? 0} tone="warn" />
           <Kpi label="Pending" value={k?.followups_pending ?? 0} tone="danger" />
           <Kpi label="Upcoming" value={k?.meetings_upcoming ?? 0} tone="accent" />
-          <Kpi label="Past week" value={k?.meetings_past ?? 0} />
+          <Kpi label="Past" value={k?.meetings_past ?? 0} />
         </div>
 
         {loading && !data ? (
@@ -738,20 +750,20 @@ export default function Dashboard() {
 
             <Section
               title="Upcoming meetings"
-              hint={`next ${data?.meta.upcoming_days ?? 2} days`}
+              hint={`next ${windowLabel(range)}`}
               count={upcoming.length}
               action={<SegFilter value={upFilter} onChange={setUpFilter} />}
             >
               {upcoming.length ? (
                 upcoming.map((m) => <MeetingItem key={m.id} m={m} />)
               ) : (
-                <Empty label={`No ${upFilter === "all" ? "" : upFilter + " "}meetings in the next two days.`} />
+                <Empty label={`No ${upFilter === "all" ? "" : upFilter + " "}meetings in the next ${windowLabel(range)}.`} />
               )}
             </Section>
 
             <Section
               title="Past meetings"
-              hint={`previous ${data?.meta.past_days ?? 7} days`}
+              hint={`previous ${windowLabel(range)}`}
               count={past.length}
               action={<SegFilter value={pastFilter} onChange={setPastFilter} />}
             >

@@ -59,3 +59,4 @@
  GET /auth/me/ 404 in 25ms (next.js: 3ms, application-code: 22ms)
  GET / 200 in 206ms (next.js: 113ms, application-code: 92ms)
  GET /auth/me/ 404 in 31ms (next.js: 7ms, application-code: 24ms)
+[?25h
