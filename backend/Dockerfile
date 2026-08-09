@@ -14,6 +14,7 @@ WORKDIR /app
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/*.py ./
+COPY scripts/ ./scripts/
 COPY --from=frontend /fe/out ./frontend_out
 COPY ["Engagement Sheet.xlsx", "./Engagement Sheet.xlsx"]
 

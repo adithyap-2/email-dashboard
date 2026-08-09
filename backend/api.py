@@ -129,21 +129,33 @@ def _range_bounds(range_key, start, end, now):
 
 
 def _parse_iso(value: str | None) -> datetime | None:
+    """Parse an ISO timestamp to an aware UTC datetime, or None.
+
+    `?start=` comes straight from the query string, so it may be anything —
+    a bare date, a local time with no zone, or junk. Anything naive is treated
+    as UTC; without that, subtracting it from an aware bound raises TypeError
+    (not ValueError) and 500s the dashboard.
+    """
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (ValueError, TypeError):
         return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def _window_span(start_iso: str, end_iso: str) -> timedelta:
     """Length of the selected range. Upcoming meetings look this far *forward*,
-    so the range selector means the same thing in every panel."""
+    so the range selector means the same thing in every panel.
+
+    Clamped: a custom range spanning years must not turn into a years-long
+    forward calendar query.
+    """
     s, e = _parse_iso(start_iso), _parse_iso(end_iso)
     if not s or not e or e <= s:
         return timedelta(days=7)
-    return e - s
+    return min(e - s, timedelta(days=SYNC_FUTURE_DAYS))
 
 
 # --- the dashboard --------------------------------------------------------
@@ -359,7 +371,12 @@ class MeetingIn(BaseModel):
     start_ts: str
     end_ts: str | None = None
     location: str | None = None
-    attendees: list[str] = []
+    # Nullable entries are tolerated on purpose. Graph occasionally returns an
+    # attendee with no emailAddress at all (room resources, some external
+    # invites), which the n8n Code node maps to null. Rejecting the value would
+    # 422 the request and drop that mailbox's ENTIRE meeting batch over one
+    # malformed attendee; nulls are stripped in _store_meetings instead.
+    attendees: list[str | None] = []
     followup_status: str = "none"
 
 
@@ -437,7 +454,7 @@ def _store_meetings(rows: list[dict], owner: str | None, source: str) -> int:
             "start_ts": r.get("start_ts"),
             "end_ts": r.get("end_ts"),
             "location": r.get("location"),
-            "attendees": json.dumps(r.get("attendees") or []),
+            "attendees": json.dumps([a for a in (r.get("attendees") or []) if a]),
             "followup_status": r.get("followup_status") or "none",
             "source": source,
         }

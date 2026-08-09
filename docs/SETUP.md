@@ -263,6 +263,18 @@ for t in ('engagements','emails','meetings'):
 All three should be non-zero. Reload <http://localhost:8000> — you should now see
 your own emails and meetings alongside the shared follow-ups.
 
+Then run the health check, which looks for the failures that produce no error
+message anywhere — a mailbox missing from the `Config` list, a busy calendar
+silently truncated at the Graph page cap, or a sheet that has stopped syncing:
+
+```bash
+docker compose exec app python /app/scripts/health.py
+```
+
+It prints per-mailbox coverage and exits non-zero if anything needs attention.
+Worth running after any change to the workflows, and any time the dashboard
+looks wrong.
+
 That is the whole setup.
 
 ---
