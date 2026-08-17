@@ -10,28 +10,17 @@ import {
   Me,
   MeetingRow,
   OverviewRow,
-  RangeKey,
-  fetchDashboard,
+  SectionRange,
+  DEFAULT_SECTION_RANGE,
+  rangeDays,
+  rangeLabel,
+  fetchDashboardDays,
   fetchMe,
   logout as apiLogout,
   refreshNow,
 } from "../lib/types";
 
 /* ------------------------------------------------------------------ helpers */
-
-const RANGES: { key: RangeKey; label: string }[] = [
-  { key: "24h", label: "24 hours" },
-  { key: "48h", label: "48 hours" },
-  { key: "7d", label: "7 days" },
-  { key: "30d", label: "30 days" },
-  { key: "custom", label: "Custom" },
-];
-
-/** The selected range, phrased for section hints ("next 24 hours"). */
-function windowLabel(range: RangeKey): string {
-  if (range === "custom") return "selected range";
-  return RANGES.find((r) => r.key === range)?.label ?? "7 days";
-}
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -184,6 +173,94 @@ function matchesComm(isExternal: boolean, f: CommFilter): boolean {
   return f === "all" ? true : f === "external" ? isExternal : !isExternal;
 }
 
+/* ------------------------------------------------ per-section time window */
+
+/**
+ * Each panel carries its own window. "Custom" reveals a number input so the
+ * user can type how many days that one section should cover.
+ */
+function RangeControl({
+  value,
+  onChange,
+}: {
+  value: SectionRange;
+  onChange: (v: SectionRange) => void;
+}) {
+  const opts: { key: SectionRange["preset"]; label: string }[] = [
+    { key: "24h", label: "24h" },
+    { key: "7d", label: "7d" },
+    { key: "custom", label: "Custom" },
+  ];
+  return (
+    <div className="flex items-center gap-1">
+      <div
+        className="flex items-center gap-0.5 p-0.5 rounded-lg"
+        style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+      >
+        {opts.map((o) => {
+          const active = value.preset === o.key;
+          return (
+            <button
+              key={o.key}
+              onClick={() => onChange({ ...value, preset: o.key })}
+              className="text-[11px] font-medium px-2 py-1 rounded-md transition-colors"
+              style={{
+                background: active ? "var(--accent)" : "transparent",
+                color: active ? "#fff" : "var(--text-muted)",
+              }}
+            >
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+      {value.preset === "custom" && (
+        <div
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded-lg"
+          style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+        >
+          <input
+            type="number"
+            min={1}
+            max={30}
+            value={value.days}
+            onChange={(e) => onChange({ ...value, days: Number(e.target.value) })}
+            className="w-11 text-[11px] font-medium bg-transparent text-right outline-none tabular-nums"
+            style={{ color: "var(--text)" }}
+            aria-label="Number of days"
+          />
+          <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+            days
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Keep only rows whose timestamp falls inside this section's own window. */
+function withinDays<T>(rows: T[], days: number, ts: (r: T) => string | null): T[] {
+  const cutoff = Date.now() - days * 86400_000;
+  return rows.filter((r) => {
+    const v = ts(r);
+    if (!v) return false;
+    const t = new Date(v).getTime();
+    return !Number.isNaN(t) && t >= cutoff;
+  });
+}
+
+/** Forward-looking equivalent, for the upcoming-meetings panel. */
+function withinNextDays<T>(rows: T[], days: number, ts: (r: T) => string | null): T[] {
+  const now = Date.now();
+  const limit = now + days * 86400_000;
+  return rows.filter((r) => {
+    const v = ts(r);
+    if (!v) return false;
+    const t = new Date(v).getTime();
+    return !Number.isNaN(t) && t >= now && t <= limit;
+  });
+}
+
 function Empty({ label }: { label: string }) {
   return (
     <div className="px-3 py-8 text-center text-[13px]" style={{ color: "var(--text-faint)" }}>
@@ -223,6 +300,118 @@ function EmailItem({ e }: { e: EmailRow }) {
         <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
           {e.organisation && <Chip>{e.organisation}</Chip>}
           {e.topic && <Chip>{e.topic}</Chip>}
+        </div>
+      </div>
+    </Row>
+  );
+}
+
+/* ------------------------------------------------------- critical alerts */
+
+/** How long something has gone unanswered. Reddens as it ages. */
+function WaitingBadge({ days }: { days: number | null }) {
+  const d = days ?? 0;
+  const tone = d >= 7 ? "var(--bad)" : d >= 3 ? "var(--warn)" : "var(--text-muted)";
+  const bg =
+    d >= 3 ? `color-mix(in srgb, ${tone} 14%, transparent)` : "var(--surface-2)";
+  return (
+    <span
+      className="inline-flex items-center text-[11px] font-semibold px-2 py-1 rounded-md whitespace-nowrap tabular-nums"
+      style={{ color: tone, background: bg, border: "1px solid var(--border)" }}
+      title={`Waiting ${d} day${d === 1 ? "" : "s"}`}
+    >
+      {d === 0 ? "today" : `${d}d waiting`}
+    </span>
+  );
+}
+
+/** Switches the single alerts panel between the mail and call views. */
+function AlertTabs({
+  value,
+  onChange,
+  emails,
+  calls,
+}: {
+  value: "emails" | "calls";
+  onChange: (v: "emails" | "calls") => void;
+  emails: number;
+  calls: number;
+}) {
+  const opts = [
+    { key: "emails" as const, label: "Emails", n: emails },
+    { key: "calls" as const, label: "Calls", n: calls },
+  ];
+  return (
+    <div
+      className="flex items-center gap-0.5 p-0.5 rounded-lg"
+      style={{ background: "var(--surface-2)", border: "1px solid var(--border)" }}
+    >
+      {opts.map((o) => {
+        const active = value === o.key;
+        return (
+          <button
+            key={o.key}
+            onClick={() => onChange(o.key)}
+            className="flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md transition-colors"
+            style={{
+              background: active ? "var(--accent)" : "transparent",
+              color: active ? "#fff" : "var(--text-muted)",
+            }}
+          >
+            {o.label}
+            <span className="tabular-nums opacity-80">{o.n}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function AlertEmailItem({ e }: { e: EmailRow & { days_waiting: number | null } }) {
+  return (
+    <Row>
+      <Avatar name={e.contact_name || e.organisation} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[13px] font-medium truncate" style={{ color: "var(--text)" }}>
+            {e.contact_name || e.contact_email || "Unknown"}
+          </span>
+          <WaitingBadge days={e.days_waiting} />
+        </div>
+        <div className="text-[13px] truncate" style={{ color: "var(--text-muted)" }}>
+          {e.subject || "(no subject)"}
+        </div>
+        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          {e.organisation && <Chip>{e.organisation}</Chip>}
+          {e.topic && <Chip>{e.topic}</Chip>}
+          <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+            received {relative(e.ts)} · no reply sent
+          </span>
+        </div>
+      </div>
+    </Row>
+  );
+}
+
+function AlertCallItem({ m }: { m: MeetingRow & { days_waiting: number | null } }) {
+  return (
+    <Row>
+      <Avatar name={m.contact_name || m.organisation} />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[13px] font-medium truncate" style={{ color: "var(--text)" }}>
+            {m.subject || "(untitled meeting)"}
+          </span>
+          <WaitingBadge days={m.days_waiting} />
+        </div>
+        <div className="text-[13px] truncate" style={{ color: "var(--text-muted)" }}>
+          {m.contact_name || m.contact_email || "Unknown participant"}
+        </div>
+        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+          {m.organisation && <Chip>{m.organisation}</Chip>}
+          <span className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+            met {relative(m.start_ts)} · no email since
+          </span>
         </div>
       </div>
     </Row>
@@ -436,8 +625,6 @@ function SignIn() {
 
 export default function Dashboard() {
   const [me, setMe] = useState<Me | null | undefined>(undefined); // undefined = checking
-  const [range, setRange] = useState<RangeKey>("7d");
-  const [custom, setCustom] = useState<{ start: string; end: string }>({ start: "", end: "" });
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -447,6 +634,22 @@ export default function Dashboard() {
   const [upFilter, setUpFilter] = useState<CommFilter>("external");
   const [pastFilter, setPastFilter] = useState<CommFilter>("external");
   const [ovFilter, setOvFilter] = useState<CommFilter>("external");
+
+  // Every panel owns its own window; there is no global range any more.
+  const [recvRange, setRecvRange] = useState<SectionRange>(DEFAULT_SECTION_RANGE);
+  const [sentRange, setSentRange] = useState<SectionRange>(DEFAULT_SECTION_RANGE);
+  const [upRange, setUpRange] = useState<SectionRange>(DEFAULT_SECTION_RANGE);
+  const [pastRange, setPastRange] = useState<SectionRange>(DEFAULT_SECTION_RANGE);
+  const [ovRange, setOvRange] = useState<SectionRange>(DEFAULT_SECTION_RANGE);
+  const [alertRange, setAlertRange] = useState<SectionRange>(DEFAULT_SECTION_RANGE);
+  const [alertTab, setAlertTab] = useState<"emails" | "calls">("emails");
+
+  // Fetch the widest window any section currently needs; each panel then
+  // slices locally, so switching a section's window costs no request unless it
+  // asks for more than what is already loaded.
+  const fetchDays = Math.max(
+    ...[recvRange, sentRange, upRange, pastRange, ovRange, alertRange].map(rangeDays)
+  );
 
   // Auth check on mount.
   useEffect(() => {
@@ -459,12 +662,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const d = await fetchDashboard(
-        range,
-        custom.start ? new Date(custom.start).toISOString() : undefined,
-        custom.end ? new Date(custom.end).toISOString() : undefined
-      );
-      setData(d);
+      setData(await fetchDashboardDays(fetchDays));
     } catch (e) {
       if (e instanceof AuthError) {
         setMe(null); // session expired — drop back to sign-in
@@ -474,13 +672,12 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [range, custom]);
+  }, [fetchDays]);
 
   useEffect(() => {
     if (!me) return; // only load once signed in
-    if (range === "custom" && !custom.start) return; // wait for a start date
     load();
-  }, [me, load, range, custom.start]);
+  }, [me, load]);
 
   // Pull anything that arrived since n8n's last scheduled run, then reload.
   const refresh = useCallback(async () => {
@@ -522,10 +719,22 @@ export default function Dashboard() {
 
   // The email sections stay external-only (as before); meetings + overview are
   // driven by their own internal/external filter.
-  const receivedExt = (data?.emails_received ?? []).filter((e) => e.is_external);
-  const sentExt = (data?.emails_sent ?? []).filter((e) => e.is_external);
-  const upcoming = (data?.meetings_upcoming ?? []).filter((m) => matchesComm(m.is_external, upFilter));
-  const past = (data?.meetings_past ?? []).filter((m) => matchesComm(m.is_external, pastFilter));
+  // Each panel narrows the fetched superset to its OWN window.
+  const receivedExt = withinDays(
+    (data?.emails_received ?? []).filter((e) => e.is_external), rangeDays(recvRange), (e) => e.ts);
+  const sentExt = withinDays(
+    (data?.emails_sent ?? []).filter((e) => e.is_external), rangeDays(sentRange), (e) => e.ts);
+  const upcoming = withinNextDays(
+    (data?.meetings_upcoming ?? []).filter((m) => matchesComm(m.is_external, upFilter)),
+    rangeDays(upRange), (m) => m.start_ts);
+  const past = withinDays(
+    (data?.meetings_past ?? []).filter((m) => matchesComm(m.is_external, pastFilter)),
+    rangeDays(pastRange), (m) => m.start_ts);
+
+  // Alerts are computed server-side over the full history; the window here
+  // only controls how far back the list is shown.
+  const alertEmails = withinDays(data?.alerts.emails ?? [], rangeDays(alertRange), (e) => e.ts);
+  const alertCalls = withinDays(data?.alerts.calls ?? [], rangeDays(alertRange), (m) => m.start_ts);
 
   // Communication overview — how much contact each organisation actually had
   // within the selected range.
@@ -543,11 +752,14 @@ export default function Dashboard() {
       row[key] += 1;
       map.set(org, row);
     };
-    [...data.emails_received, ...data.emails_sent]
-      .filter((e) => matchesComm(e.is_external, ovFilter))
+    const d = rangeDays(ovRange);
+    withinDays(
+      [...data.emails_received, ...data.emails_sent].filter((e) =>
+        matchesComm(e.is_external, ovFilter)), d, (e) => e.ts)
       .forEach((e) => bump(e.organisation, "emails"));
-    data.meetings_past
-      .filter((m) => matchesComm(m.is_external, ovFilter))
+    withinDays(
+      data.meetings_past.filter((m) => matchesComm(m.is_external, ovFilter)),
+      d, (m) => m.start_ts)
       .forEach((m) => bump(m.organisation, "meetings"));
     return [...map.values()].sort((a, b) => b.emails + b.meetings - (a.emails + a.meetings));
   })();
@@ -563,30 +775,10 @@ export default function Dashboard() {
             </h1>
             <p className="text-[13px] mt-0.5" style={{ color: "var(--text-muted)" }}>
               Your external communications, meetings, and follow-ups — at a glance.
+              <span className="hidden sm:inline"> Each section has its own time window.</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <div
-              className="flex items-center gap-0.5 p-1 rounded-xl"
-              style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-            >
-              {RANGES.map((r) => {
-                const active = range === r.key;
-                return (
-                  <button
-                    key={r.key}
-                    onClick={() => setRange(r.key)}
-                    className="text-[12px] font-medium px-3 py-1.5 rounded-lg transition-colors"
-                    style={{
-                      background: active ? "var(--accent)" : "transparent",
-                      color: active ? "#fff" : "var(--text-muted)",
-                    }}
-                  >
-                    {r.label}
-                  </button>
-                );
-              })}
-            </div>
             {/* Pull anything that landed since the last scheduled sync. */}
             <button
               onClick={refresh}
@@ -650,29 +842,6 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {range === "custom" && (
-          <div
-            className="flex flex-wrap items-center gap-3 mb-6 px-4 py-3 rounded-xl text-[13px]"
-            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
-          >
-            <span style={{ color: "var(--text-muted)" }}>From</span>
-            <input
-              type="date"
-              value={custom.start}
-              onChange={(e) => setCustom((c) => ({ ...c, start: e.target.value }))}
-              className="px-2 py-1 rounded-md bg-transparent"
-              style={{ border: "1px solid var(--border-strong)", color: "var(--text)" }}
-            />
-            <span style={{ color: "var(--text-muted)" }}>to</span>
-            <input
-              type="date"
-              value={custom.end}
-              onChange={(e) => setCustom((c) => ({ ...c, end: e.target.value }))}
-              className="px-2 py-1 rounded-md bg-transparent"
-              style={{ border: "1px solid var(--border-strong)", color: "var(--text)" }}
-            />
-          </div>
-        )}
 
         {/* Live-data notice: some Graph calls failed (e.g. calendar scope not
             consented yet). Emails/meetings are the signed-in user's own. */}
@@ -707,6 +876,11 @@ export default function Dashboard() {
           <Kpi label="Pending" value={k?.followups_pending ?? 0} tone="danger" />
           <Kpi label="Upcoming" value={k?.meetings_upcoming ?? 0} tone="accent" />
           <Kpi label="Past" value={k?.meetings_past ?? 0} />
+          <Kpi
+            label="Needs reply"
+            value={(k?.alerts_emails ?? 0) + (k?.alerts_calls ?? 0)}
+            tone="danger"
+          />
         </div>
 
         {loading && !data ? (
@@ -732,54 +906,115 @@ export default function Dashboard() {
               )}
             </Section>
 
-            <Section title="External emails received" count={receivedExt.length}>
+            <Section
+              title="External emails received"
+              hint={`last ${rangeLabel(recvRange)}`}
+              count={receivedExt.length}
+              action={<RangeControl value={recvRange} onChange={setRecvRange} />}
+            >
               {receivedExt.length ? (
                 receivedExt.map((e) => <EmailItem key={e.id} e={e} />)
               ) : (
-                <Empty label="No external emails received in this range." />
+                <Empty label={`No external emails received in the last ${rangeLabel(recvRange)}.`} />
               )}
             </Section>
 
-            <Section title="External emails sent" count={sentExt.length}>
+            <Section
+              title="External emails sent"
+              hint={`last ${rangeLabel(sentRange)}`}
+              count={sentExt.length}
+              action={<RangeControl value={sentRange} onChange={setSentRange} />}
+            >
               {sentExt.length ? (
                 sentExt.map((e) => <EmailItem key={e.id} e={e} />)
               ) : (
-                <Empty label="No external emails sent in this range." />
+                <Empty label={`No external emails sent in the last ${rangeLabel(sentRange)}.`} />
               )}
             </Section>
 
             <Section
               title="Upcoming meetings"
-              hint={`next ${windowLabel(range)}`}
+              hint={`next ${rangeLabel(upRange)}`}
               count={upcoming.length}
-              action={<SegFilter value={upFilter} onChange={setUpFilter} />}
+              action={
+                <div className="flex items-center gap-1.5">
+                  <SegFilter value={upFilter} onChange={setUpFilter} />
+                  <RangeControl value={upRange} onChange={setUpRange} />
+                </div>
+              }
             >
               {upcoming.length ? (
                 upcoming.map((m) => <MeetingItem key={m.id} m={m} />)
               ) : (
-                <Empty label={`No ${upFilter === "all" ? "" : upFilter + " "}meetings in the next ${windowLabel(range)}.`} />
+                <Empty label={`No ${upFilter === "all" ? "" : upFilter + " "}meetings in the next ${rangeLabel(upRange)}.`} />
               )}
             </Section>
 
             <Section
               title="Past meetings"
-              hint={`previous ${windowLabel(range)}`}
+              hint={`last ${rangeLabel(pastRange)}`}
               count={past.length}
-              action={<SegFilter value={pastFilter} onChange={setPastFilter} />}
+              action={
+                <div className="flex items-center gap-1.5">
+                  <SegFilter value={pastFilter} onChange={setPastFilter} />
+                  <RangeControl value={pastRange} onChange={setPastRange} />
+                </div>
+              }
             >
               {past.length ? (
                 past.map((m) => <MeetingItem key={m.id} m={m} past />)
               ) : (
-                <Empty label={`No ${pastFilter === "all" ? "" : pastFilter + " "}meetings in the previous week.`} />
+                <Empty label={`No ${pastFilter === "all" ? "" : pastFilter + " "}meetings in the last ${rangeLabel(pastRange)}.`} />
               )}
             </Section>
+
+            {/* Critical alerts spans both columns — it is the action list. */}
+            <div className="lg:col-span-2">
+              <Section
+                title="Critical alerts"
+                hint={
+                  alertTab === "emails"
+                    ? "external mail with no reply from us"
+                    : "external calls with no follow-up email"
+                }
+                count={alertTab === "emails" ? alertEmails.length : alertCalls.length}
+                action={
+                  <div className="flex items-center gap-1.5">
+                    <AlertTabs
+                      value={alertTab}
+                      onChange={setAlertTab}
+                      emails={alertEmails.length}
+                      calls={alertCalls.length}
+                    />
+                    <RangeControl value={alertRange} onChange={setAlertRange} />
+                  </div>
+                }
+              >
+                {alertTab === "emails" ? (
+                  alertEmails.length ? (
+                    alertEmails.map((e) => <AlertEmailItem key={e.id} e={e} />)
+                  ) : (
+                    <Empty label={`Nothing unanswered in the last ${rangeLabel(alertRange)}.`} />
+                  )
+                ) : alertCalls.length ? (
+                  alertCalls.map((m) => <AlertCallItem key={m.id} m={m} />)
+                ) : (
+                  <Empty label={`Every call in the last ${rangeLabel(alertRange)} was followed up.`} />
+                )}
+              </Section>
+            </div>
 
             {/* Communication overview spans both columns */}
             <div className="lg:col-span-2">
               <Section
                 title="Communication overview"
-                hint="emails vs. meetings by organisation"
-                action={<SegFilter value={ovFilter} onChange={setOvFilter} />}
+                hint={`emails vs. meetings by organisation · last ${rangeLabel(ovRange)}`}
+                action={
+                  <div className="flex items-center gap-1.5">
+                    <SegFilter value={ovFilter} onChange={setOvFilter} />
+                    <RangeControl value={ovRange} onChange={setOvRange} />
+                  </div>
+                }
               >
                 <OrgOverview rows={overview} />
               </Section>

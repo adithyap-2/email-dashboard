@@ -4,6 +4,32 @@
 
 export type RangeKey = "24h" | "48h" | "7d" | "30d" | "custom";
 
+/**
+ * A single section's own time window. Each panel owns one of these, so the
+ * dashboard no longer has a single global filter.
+ * `days` is only read when preset === "custom".
+ */
+export interface SectionRange {
+  preset: "24h" | "7d" | "custom";
+  days: number;
+}
+
+export const DEFAULT_SECTION_RANGE: SectionRange = { preset: "7d", days: 14 };
+
+/** Window length in days — what the section actually filters by. */
+export function rangeDays(r: SectionRange): number {
+  if (r.preset === "24h") return 1;
+  if (r.preset === "7d") return 7;
+  return Math.max(1, Math.min(30, Math.round(r.days) || 1));
+}
+
+export function rangeLabel(r: SectionRange): string {
+  const d = rangeDays(r);
+  if (r.preset === "24h") return "24 hours";
+  if (r.preset === "7d") return "7 days";
+  return d === 1 ? "1 day" : `${d} days`;
+}
+
 export interface EmailRow {
   id: string;
   direction: "received" | "sent";
@@ -71,6 +97,16 @@ export interface DashboardData {
     followups_pending: number;
     meetings_upcoming: number;
     meetings_past: number;
+    alerts_emails: number;
+    alerts_calls: number;
+  };
+  /**
+   * Things needing a response. Computed server-side because "did we reply?"
+   * has to look at sent mail well outside the displayed window.
+   */
+  alerts: {
+    emails: (EmailRow & { days_waiting: number | null })[];
+    calls: (MeetingRow & { days_waiting: number | null })[];
   };
   emails_received: EmailRow[];
   emails_sent: EmailRow[];
@@ -101,6 +137,21 @@ export async function logout(): Promise<void> {
 }
 
 export class AuthError extends Error {}
+
+/**
+ * Sections filter locally, so this fetches the WIDEST window any section
+ * currently needs and the client slices per panel. Changing a section's window
+ * is then instant unless it grows beyond what was already fetched.
+ */
+export async function fetchDashboardDays(days: number): Promise<DashboardData> {
+  const res = await fetch(`${API}/api/dashboard?days=${Math.max(1, Math.min(30, days))}`, {
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (res.status === 401) throw new AuthError("not signed in");
+  if (!res.ok) throw new Error(`Backend error ${res.status}`);
+  return res.json();
+}
 
 export async function fetchDashboard(
   range: RangeKey,

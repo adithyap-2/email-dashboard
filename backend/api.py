@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -44,6 +45,74 @@ _EXTRA_INTERNAL = {
     for d in os.environ.get("INTERNAL_DOMAINS", "").split(",")
     if d.strip()
 }
+
+# --- critical-alert noise filtering ---------------------------------------
+# Alerts are only useful if every row is something a person should act on, so
+# machine-generated mail is excluded. Three layers, all applied to EXTERNAL
+# mail that has already passed the internal/external test.
+
+# 1. Senders nobody replies to. Matched on the full address or on "@domain".
+#    Defaults cover the meeting bots and tooling seen in this tenant; extend
+#    with ALERT_IGNORE_SENDERS in .env (comma-separated).
+_DEFAULT_NOISE_SENDERS = {
+    "@fireflies.ai", "@read.ai", "@e.read.ai",          # meeting-recording bots
+    "@tasks.clickup.com", "@mail.clickup.com",           # task tooling
+    "@sharepointonline.com", "@uptimerobot.com",
+    "@beehiiv.com", "@substack.com",                     # newsletters
+}
+_NOISE_SENDERS = _DEFAULT_NOISE_SENDERS | {
+    s.strip().lower()
+    for s in os.environ.get("ALERT_IGNORE_SENDERS", "").split(",")
+    if s.strip()
+}
+
+# 2. Local parts that mark an unattended mailbox. Bounded by separators so a
+#    real person like "alerta.moreno@" is not swallowed.
+_NOISE_LOCALPART = re.compile(
+    r"(^|[.\-_+])(noreply|no|donotreply|do|notification|notifications|mailer|"
+    r"mailers|newsletter|alert|alerts|automated|bounce|postmaster|"
+    r"marketing|updates|welcome|account|accounts|billing|invoice|receipt|"
+    r"digest|notify|verify|confirm|info|communication|communications)([.\-_+]|$)"
+)
+
+# Escape hatch: a real partner using info@theirorg.com would otherwise be
+# suppressed by the rule above. Anything listed here always raises alerts.
+# Full addresses or "@domain", comma-separated, via ALERT_ALWAYS_ALERT in .env.
+_ALWAYS_ALERT = {
+    s.strip().lower()
+    for s in os.environ.get("ALERT_ALWAYS_ALERT", "").split(",")
+    if s.strip()
+}
+
+# 3. Calendar chatter and out-of-office. These are replies *to* us, so they
+#    would otherwise look like live threads needing an answer.
+_NOISE_SUBJECT = re.compile(
+    r"^\s*(accepted|declined|tentative|canceled|cancelled|invitation|"
+    r"updated invitation|automatic reply|out of office|undeliverable)\s*:",
+    re.I,
+)
+
+
+def _is_noise(row: dict) -> bool:
+    """True if this email is machine-generated and should never raise an alert."""
+    addr = (row.get("contact_email") or "").strip().lower()
+    if not addr or "@" not in addr:
+        return True
+    local, _, domain = addr.partition("@")
+    if addr in _ALWAYS_ALERT or f"@{domain}" in _ALWAYS_ALERT:
+        return False
+    if addr in _NOISE_SENDERS:
+        return True
+    # Domain entries match subdomains too: senders routinely come from
+    # mail.beehiiv.com or mail.uptimerobot.com rather than the bare domain.
+    for entry in _NOISE_SENDERS:
+        if entry.startswith("@"):
+            d = entry[1:]
+            if domain == d or domain.endswith("." + d):
+                return True
+    if _NOISE_LOCALPART.search(local):
+        return True
+    return bool(_NOISE_SUBJECT.match(row.get("subject") or ""))
 
 
 # --- DB read path (n8n-populated data, filtered to the signed-in user) -----
@@ -128,6 +197,69 @@ def _range_bounds(range_key, start, end, now):
     return _graph_iso(now - timedelta(hours=hours)), _graph_iso(now)
 
 
+# --- critical alerts ------------------------------------------------------
+# Two questions a person actually needs answered:
+#   1. Which external emails have I not replied to?
+#   2. Which external calls happened without me following up by email?
+#
+# Both are "absence of a reply" checks, so they need the SENT side over a wider
+# span than the panel being displayed: an email from 20 days ago may have been
+# answered yesterday. The reply lookup therefore always runs over the full sync
+# window, independent of the alert window being shown.
+CALL_FOLLOWUP_HOURS = 24
+
+
+def _reply_index(owner: str, since_iso: str, until_iso: str) -> dict[str, list[str]]:
+    """contact_email -> sorted timestamps of mail WE sent them."""
+    idx: dict[str, list[str]] = {}
+    for row in _db_emails(owner, "sent", since_iso, until_iso):
+        addr = (row.get("contact_email") or "").strip().lower()
+        if addr:
+            idx.setdefault(addr, []).append(row["ts"])
+    for v in idx.values():
+        v.sort()
+    return idx
+
+
+def _replied_after(idx: dict[str, list[str]], addr: str | None, after_iso: str) -> bool:
+    """Did we send this contact anything after `after_iso`?"""
+    if not addr:
+        return False
+    return any(ts > after_iso for ts in idx.get(addr.strip().lower(), []))
+
+
+def _critical_alerts(received: list[dict], past_meetings: list[dict],
+                     idx: dict[str, list[str]], now: datetime) -> dict:
+    """Unanswered external mail, and external calls with no follow-up email."""
+    unreplied = [
+        {**r, "days_waiting": _days_since(r.get("ts"), now)}
+        for r in received
+        if r.get("is_external") and not _is_noise(r)
+        and not _replied_after(idx, r.get("contact_email"), r.get("ts") or "")
+    ]
+
+    # A call only counts once the follow-up window has actually elapsed —
+    # flagging a meeting that ended ten minutes ago would just be noise.
+    deadline = _graph_iso(now - timedelta(hours=CALL_FOLLOWUP_HOURS))
+    calls = [
+        {**m, "days_waiting": _days_since(m.get("end_ts") or m.get("start_ts"), now)}
+        for m in past_meetings
+        if m.get("is_external")
+        and (m.get("end_ts") or m.get("start_ts") or "") < deadline
+        and not _replied_after(idx, m.get("contact_email"),
+                               m.get("end_ts") or m.get("start_ts") or "")
+    ]
+
+    unreplied.sort(key=lambda r: r.get("ts") or "", reverse=True)
+    calls.sort(key=lambda m: m.get("start_ts") or "", reverse=True)
+    return {"emails": unreplied, "calls": calls}
+
+
+def _days_since(iso_ts: str | None, now: datetime) -> int | None:
+    dt = _parse_iso(iso_ts)
+    return (now - dt).days if dt else None
+
+
 def _parse_iso(value: str | None) -> datetime | None:
     """Parse an ISO timestamp to an aware UTC datetime, or None.
 
@@ -165,10 +297,22 @@ def dashboard(
     range: str = Query("7d"),
     start: str | None = None,
     end: str | None = None,
+    days: int | None = Query(None, ge=1, le=SYNC_PAST_DAYS),
 ):
+    """Dashboard payload.
+
+    `days` overrides `range` and is what the UI sends: each section owns its own
+    window now, so the client asks for the WIDEST window any section needs and
+    slices per-section locally. One request, and changing a section's window is
+    instant unless it grows past what was already fetched.
+    """
     warnings: list[str] = []
     now = datetime.now(timezone.utc)
-    start_iso, end_iso = _range_bounds(range, start, end, now)
+    if days:
+        range = "custom"
+        start_iso, end_iso = _graph_iso(now - timedelta(days=days)), _graph_iso(now)
+    else:
+        start_iso, end_iso = _range_bounds(range, start, end, now)
     # Every panel honours the range selector. Emails and past meetings look back
     # over it; upcoming meetings look the same distance forward. These windows
     # used to be fixed (+2d / -7d) no matter what the user picked, so "24 hours"
@@ -204,6 +348,23 @@ def dashboard(
         sent = safe(graph_data.sent_emails, token, start_iso, end_iso, internal)
         upcoming = safe(graph_data.meetings, token, up_start, up_end, internal)
         past = safe(graph_data.meetings, token, past_start, past_end, internal)
+
+    # "Have we replied?" must look at sent mail well beyond the displayed
+    # window — a message from three weeks ago may have been answered today.
+    if DASHBOARD_SOURCE == "db":
+        reply_idx = _reply_index(
+            user["session"].get("username") or "",
+            _graph_iso(now - timedelta(days=SYNC_PAST_DAYS)), _graph_iso(now),
+        )
+    else:
+        # Live mode only has what was just fetched, so the reply check is
+        # limited to the displayed window and may over-report.
+        reply_idx = {}
+        for row in sent:
+            addr = (row.get("contact_email") or "").strip().lower()
+            if addr:
+                reply_idx.setdefault(addr, []).append(row["ts"])
+        warnings.append("alerts_approximate_in_graph_mode")
 
     today = reference_today()
     today_iso = today.isoformat()
@@ -246,6 +407,8 @@ def dashboard(
     def ext(rows):
         return sum(1 for r in rows if r.get("is_external"))
 
+    alerts = _critical_alerts(received, past, reply_idx, now)
+
     return {
         "meta": {
             "today": today_iso,
@@ -267,6 +430,8 @@ def dashboard(
             "followups_pending": len(followups_pending),
             "meetings_upcoming": ext(upcoming),
             "meetings_past": ext(past),
+            "alerts_emails": len(alerts["emails"]),
+            "alerts_calls": len(alerts["calls"]),
         },
         "emails_received": received,
         "emails_sent": sent,
@@ -274,6 +439,7 @@ def dashboard(
         "followups_pending": followups_pending,
         "meetings_upcoming": upcoming,
         "meetings_past": past,
+        "alerts": alerts,
     }
 
 
